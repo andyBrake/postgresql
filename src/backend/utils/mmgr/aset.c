@@ -776,7 +776,7 @@ AllocSetAlloc(MemoryContext context, Size size)
 	if ((block = set->blocks) != NULL)
 	{
 		Size		availspace = block->endptr - block->freeptr;
-
+		/* 剩余空间不足以满足本次请求时，将剩余空间拆分到freeList中去 */
 		if (availspace < (chunk_size + ALLOC_CHUNKHDRSZ))
 		{
 			/*
@@ -794,6 +794,7 @@ AllocSetAlloc(MemoryContext context, Size size)
 			while (availspace >= ((1 << ALLOC_MINBITS) + ALLOC_CHUNKHDRSZ))
 			{
 				Size		availchunk = availspace - ALLOC_CHUNKHDRSZ;
+				/* 剩余空间能够放在哪个slot，尽量让空间大 */
 				int			a_fidx = AllocSetFreeIndex(availchunk);
 
 				/*
@@ -807,7 +808,8 @@ AllocSetAlloc(MemoryContext context, Size size)
 					Assert(a_fidx >= 0);
 					availchunk = ((Size) 1 << (a_fidx + ALLOC_MINBITS));
 				}
-
+				/* 将block的freeptr往后移动对应拆分出去大小，表示availchunk大小的空间装进freelist不再是free的了
+				   同时，把availspace空间减去拆分出的空间，递归地插入freelist */
 				chunk = (AllocChunk) (block->freeptr);
 
 				/* Prepare to initialize the chunk header. */
@@ -820,6 +822,11 @@ AllocSetAlloc(MemoryContext context, Size size)
 #ifdef MEMORY_CONTEXT_CHECKING
 				chunk->requested_size = 0;		/* mark it free */
 #endif
+        /*
+				   chunk的aset设置为freelist中对应项，理论上这个指针一定不为Allocset，因为为Allocset表示
+				   该chunk已经被分配出去了，初始值是为NULL的，后续会为空闲chunk指针，这里的操作相当于把空间chunk
+					 串成了一个单链表，类似block链表
+				*/
 				chunk->aset = (void *) set->freelist[a_fidx];
 				set->freelist[a_fidx] = chunk;
 			}
